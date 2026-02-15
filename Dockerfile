@@ -20,7 +20,7 @@ RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \
       cat $ROCKS_CMAKE; \
       sed -i '/-momit-leaf-frame-pointer/ a\  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-copy -Wno-unused-but-set-variable")' $ROCKS_CMAKE; \
       sed -i 's/TARGETS ${ROCKSDB_SHARED_LIB}/TARGETS ${ROCKSDB_SHARED_LIB} OPTIONAL/' $ROCKS_CMAKE; \
-      cat $ROCKS_CMAKE \
+      cat $ROCKS_CMAKE; \
     fi
 
 ENV LD_LIBRARY_PATH /home/AeonG/libs/protobuf/lib:$LD_LIBRARY_PATH
