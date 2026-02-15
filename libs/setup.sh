@@ -196,7 +196,7 @@ file_get_try_double "${primary_urls[neo4j]}" "${secondary_urls[neo4j]}"
  rocksdb_tag="v6.14.6" # (2020-10-14)
  repo_clone_try_double "${primary_urls[rocksdb]}" "${secondary_urls[rocksdb]}" "rocksdb" "$rocksdb_tag" true
  pushd rocksdb
- git apply ../rocksdb.patch
+#  git apply ../rocksdb.patch
  popd
 
  # mgclient
