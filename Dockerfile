@@ -16,10 +16,9 @@ RUN mkdir -p libs && cd libs && \
 # RUN sed -i 's/^\s*git apply ..\/rocksdb.patch/\# &/' setup.sh || true
 
 
-RUN source /opt/toolchain-v4/activate
+RUN source /opt/toolchain-v4/activate && /home/AeonG/init || find . -name "config.log" -exec cat {} +
 # Initialize project (downloads dependencies). This may be slow.
 
-RUN ./init
 
 # Apply RocksDB related small fixes described in instructions
 RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \

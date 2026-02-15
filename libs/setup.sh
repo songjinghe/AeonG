@@ -103,7 +103,7 @@ repo_clone_try_double () {
 # possible. The actual cache server could be on your local machine, on a
 # dedicated machine inside the build cluster or on the actual build machine.
 # Download from primary_urls might fail because the cache is not installed.
-declare -A primary_urls=(
+declare -A secondary_urls=(
   ["antlr4-code"]="http://$local_cache_host/git/antlr4.git"
   ["antlr4-generator"]="http://$local_cache_host/file/antlr-4.9.2-complete.jar"
   ["cppitertools"]="http://$local_cache_host/git/cppitertools.git"
@@ -128,7 +128,8 @@ declare -A primary_urls=(
 # dependencies, e.g., Github or S3. Download from secondary urls, if happens
 # at all, should never fail. In other words, if it fails, the whole build
 # should fail.
-declare -A secondary_urls=(
+# declare -A secondary_urls=(
+declare -A primary_urls=(
   ["antlr4-code"]="https://github.com/antlr/antlr4.git"
   ["antlr4-generator"]="http://www.antlr.org/download/antlr-4.9.2-complete.jar"
   ["cppitertools"]="https://github.com/ryanhaining/cppitertools.git"
@@ -180,7 +181,7 @@ popd
 
 # neo4j
 file_get_try_double "${primary_urls[neo4j]}" "${secondary_urls[neo4j]}"
- wget "http://s3-eu-west-1.amazonaws.com/deps.memgraph.io/neo4j-community-3.2.3-unix.tar.gz"
+ wget -q "http://s3-eu-west-1.amazonaws.com/deps.memgraph.io/neo4j-community-3.2.3-unix.tar.gz"
  tar -xzf neo4j-community-3.2.3-unix.tar.gz
  mv neo4j-community-3.2.3 neo4j
  rm neo4j-community-3.2.3-unix.tar.gz
@@ -219,12 +220,14 @@ file_get_try_double "${primary_urls[neo4j]}" "${secondary_urls[neo4j]}"
  librdkafka_tag="v1.7.0" # (2021-05-06)
  repo_clone_try_double "${primary_urls[librdkafka]}" "${secondary_urls[librdkafka]}" "librdkafka" "$librdkafka_tag" true
 
+echo "All dependencies are install..."
 # protobuf
  protobuf_tag="v3.12.4"
  repo_clone_try_double "${primary_urls[protobuf]}" "${secondary_urls[protobuf]}" "protobuf" "$protobuf_tag" true
 pushd protobuf
 ./autogen.sh && ./configure CC=clang CXX=clang++ --prefix=$(pwd)/lib
 popd
+echo "Protobuf is built and installed in protobuf/lib directory"
 
 #pulsar
 pulsar_tag="v2.8.1"
