@@ -30,7 +30,7 @@ KVStore::KVStore(std::filesystem::path storage) : pimpl_(std::make_unique<impl>(
   if (!utils::EnsureDir(pimpl_->storage))
     throw KVStoreError("Folder for the key-value store " + pimpl_->storage.string() + " couldn't be initialized!");
   pimpl_->options.create_if_missing = true;
-  pimpl_->options.write_buffer_size=640 << 20;// hjm begin
+  pimpl_->options.write_buffer_size=64 << 20; // hjm begin, sjh edit
   rocksdb::DB *db = nullptr;
   auto s = rocksdb::DB::Open(pimpl_->options, storage.c_str(), &db);
   if (!s.ok())
@@ -49,7 +49,9 @@ KVStore &KVStore::operator=(KVStore &&other) {
 }
 
 bool KVStore::Put(const std::string &key, const std::string &value) {
-  auto s = pimpl_->db->Put(rocksdb::WriteOptions(), key, value);
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
+  auto s = pimpl_->db->Put(options, key, value);
   return s.ok();
 }
 
@@ -58,7 +60,9 @@ bool KVStore::PutMultiple(const std::map<std::string, std::string> &items) {
   for (const auto &item : items) {
     batch.Put(item.first, item.second);
   }
-  auto s = pimpl_->db->Write(rocksdb::WriteOptions(), &batch);
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
+  auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
 
@@ -70,7 +74,9 @@ std::optional<std::string> KVStore::Get(const std::string &key) const noexcept {
 }
 
 bool KVStore::Delete(const std::string &key) {
-  auto s = pimpl_->db->Delete(rocksdb::WriteOptions(), key);
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
+  auto s = pimpl_->db->Delete(options, key);
   return s.ok();
 }
 
@@ -79,15 +85,19 @@ bool KVStore::DeleteMultiple(const std::vector<std::string> &keys) {
   for (const auto &key : keys) {
     batch.Delete(key);
   }
-  auto s = pimpl_->db->Write(rocksdb::WriteOptions(), &batch);
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
+  auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
 
 bool KVStore::DeletePrefix(const std::string &prefix) {
   std::unique_ptr<rocksdb::Iterator> iter =
       std::unique_ptr<rocksdb::Iterator>(pimpl_->db->NewIterator(rocksdb::ReadOptions()));
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
   for (iter->Seek(prefix); iter->Valid() && iter->key().starts_with(prefix); iter->Next()) {
-    if (!pimpl_->db->Delete(rocksdb::WriteOptions(), iter->key()).ok()) return false;
+    if (!pimpl_->db->Delete(options, iter->key()).ok()) return false;
   }
   return true;
 }
@@ -101,7 +111,9 @@ bool KVStore::PutAndDeleteMultiple(const std::map<std::string, std::string> &ite
   for (const auto &key : keys) {
     batch.Delete(key);
   }
-  auto s = pimpl_->db->Write(rocksdb::WriteOptions(), &batch);
+  rocksdb::WriteOptions options;
+  options.disableWAL = true;
+  auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
 
