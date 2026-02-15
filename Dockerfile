@@ -14,6 +14,11 @@ RUN mkdir -p libs && cd libs && \
 # Modify setup.sh to skip applying rocksdb.patch (comment matching line)
 # RUN sed -i 's/^\s*git apply ..\/rocksdb.patch/\# &/' setup.sh || true
 
+
+RUN source /opt/toolchain-v4/activate
+# Initialize project (downloads dependencies). This may be slow.
+RUN bash /home/AeonG/init
+
 # Apply RocksDB related small fixes described in instructions
 RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \
     if [ -f "$ROCKS_CMAKE" ]; then \
@@ -25,10 +30,6 @@ RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \
 
 ENV LD_LIBRARY_PATH /home/AeonG/libs/protobuf/lib:$LD_LIBRARY_PATH
 RUN git checkout -- quicklisp.lisp
-
-RUN source /opt/toolchain-v4/activate
-# Initialize project (downloads dependencies). This may be slow.
-RUN bash /home/AeonG/init
 
 # Build memgraph (server)
 RUN mkdir -p build && cd build && cmake .. && make -j$(nproc) memgraph
