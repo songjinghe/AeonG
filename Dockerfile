@@ -33,11 +33,11 @@ ENV LD_LIBRARY_PATH /home/AeonG/libs/protobuf/lib:$LD_LIBRARY_PATH
 RUN git checkout -- quicklisp.lisp
 
 # Build memgraph (server)
-RUN mkdir -p build && cd build && cmake .. && make -j$(nproc) memgraph
+RUN mkdir -p build && cd build && source /opt/toolchain-v4/activate && cmake .. && make -j$(nproc) memgraph
 
 # Build mgbench client and libs/mgconsole as per instructions
-RUN mkdir -p build/tests/mgbench && cd build/tests/mgbench && make
-RUN mkdir -p build/libs && cd build/libs && make
+RUN mkdir -p build/tests/mgbench && cd build/tests/mgbench && source /opt/toolchain-v4/activate && make
+RUN mkdir -p build/libs && cd build/libs && source /opt/toolchain-v4/activate && make
 
 # Collect built binaries
 # RUN mkdir -p /out/bin && if [ -d build/bin ]; then cp -a build/bin/* /out/bin/ || true; fi
