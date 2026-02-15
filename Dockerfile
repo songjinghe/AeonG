@@ -2,7 +2,7 @@ FROM hououou/aeong:v1
 MAINTAINER Jinghe Song <songjh@buaa.edu.cn>
 ARG TZ=Asia/Shanghai
 
-WORKDIR cd /home/AeonG
+WORKDIR /home/AeonG
 COPY . .
 RUN find .
 
@@ -19,7 +19,7 @@ RUN mkdir -p libs && cd libs && \
 RUN source /opt/toolchain-v4/activate
 # Initialize project (downloads dependencies). This may be slow.
 
-RUN /home/AeonG/init
+RUN ./init
 
 # Apply RocksDB related small fixes described in instructions
 RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \
