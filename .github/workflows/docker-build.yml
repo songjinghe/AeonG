@@ -26,7 +26,7 @@ jobs:
         username: songjinghe
         password: ${{ secrets.dockerhub }}
     
-    - name: Build and Push Docker Image (aion-5.7.0-community)
+    - name: Build and Push Docker Image (aeong-2.2)
       uses: docker/build-push-action@v5
       with:
         context: .

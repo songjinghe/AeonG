@@ -4,7 +4,6 @@ ARG TZ=Asia/Shanghai
 
 WORKDIR /home/AeonG
 COPY . .
-RUN find .
 
 # Download required patches into libs
 RUN mkdir -p libs && cd libs && \
@@ -33,7 +32,7 @@ ENV LD_LIBRARY_PATH /home/AeonG/libs/protobuf/lib:$LD_LIBRARY_PATH
 RUN git checkout -- quicklisp.lisp
 
 # Build memgraph (server)
-RUN mkdir -p build && cd build && source /opt/toolchain-v4/activate && cmake .. && make -j$(nproc) memgraph
+RUN mkdir -p build && cd build && source /opt/toolchain-v4/activate && cmake .. && make -j$(nproc) memgraph && ls -l
 
 # Build mgbench client and libs/mgconsole as per instructions
 RUN mkdir -p build/tests/mgbench && cd build/tests/mgbench && source /opt/toolchain-v4/activate && make

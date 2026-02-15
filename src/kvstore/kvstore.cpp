@@ -50,7 +50,7 @@ KVStore &KVStore::operator=(KVStore &&other) {
 
 bool KVStore::Put(const std::string &key, const std::string &value) {
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   auto s = pimpl_->db->Put(options, key, value);
   return s.ok();
 }
@@ -61,7 +61,7 @@ bool KVStore::PutMultiple(const std::map<std::string, std::string> &items) {
     batch.Put(item.first, item.second);
   }
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
@@ -75,7 +75,7 @@ std::optional<std::string> KVStore::Get(const std::string &key) const noexcept {
 
 bool KVStore::Delete(const std::string &key) {
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   auto s = pimpl_->db->Delete(options, key);
   return s.ok();
 }
@@ -86,7 +86,7 @@ bool KVStore::DeleteMultiple(const std::vector<std::string> &keys) {
     batch.Delete(key);
   }
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
@@ -95,7 +95,7 @@ bool KVStore::DeletePrefix(const std::string &prefix) {
   std::unique_ptr<rocksdb::Iterator> iter =
       std::unique_ptr<rocksdb::Iterator>(pimpl_->db->NewIterator(rocksdb::ReadOptions()));
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   for (iter->Seek(prefix); iter->Valid() && iter->key().starts_with(prefix); iter->Next()) {
     if (!pimpl_->db->Delete(options, iter->key()).ok()) return false;
   }
@@ -112,7 +112,7 @@ bool KVStore::PutAndDeleteMultiple(const std::map<std::string, std::string> &ite
     batch.Delete(key);
   }
   rocksdb::WriteOptions options;
-  options.disableWAL = true;
+  // options.disableWAL = true;
   auto s = pimpl_->db->Write(options, &batch);
   return s.ok();
 }
