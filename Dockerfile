@@ -4,6 +4,7 @@ ARG TZ=Asia/Shanghai
 
 WORKDIR cd /home/AeonG
 COPY . .
+RUN find .
 
 # Download required patches into libs
 RUN mkdir -p libs && cd libs && \
@@ -17,7 +18,8 @@ RUN mkdir -p libs && cd libs && \
 
 RUN source /opt/toolchain-v4/activate
 # Initialize project (downloads dependencies). This may be slow.
-RUN bash /home/AeonG/init
+
+RUN /home/AeonG/init
 
 # Apply RocksDB related small fixes described in instructions
 RUN ROCKS_CMAKE="libs/rocksdb/CMakeLists.txt" && \
