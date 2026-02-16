@@ -1025,23 +1025,18 @@ void addHistoryEdge(EdgeAccessor current_edge_,uint64_t current_v_ts,uint64_t cu
     if(edge_vector){
       for(auto[edge,ts,te]:*edge_vector){
         auto edge1=*edge;
-        auto edge_expand_vertex = direction==EdgeAtom::Direction::IN?edge1.From():edge1.To();
-        pull_nodes_current_history(context,edge_expand_vertex, ts, te,TypedValue(edge1),history_add_,historyContext_);
+        pull_nodes_current_history(context,expand_vertex, ts, te,TypedValue(edge1),history_add_,historyContext_);
       }
     }
   }else{
     // 从KV中获取历史边信息
     auto [gid_history_deltas_,flag]=context.db_accessor->GetHistoryDelta()->GetEdgeInfo(historyContext_.c_ts,historyContext_.c_te,historyContext_.types,gid);
     if(gid_history_deltas_.size()>0){
-      storage::HistoryEdge current_edge1=storage::HistoryEdge(current_edge_.Gid(),current_edge_.From().Gid(),current_edge_.To().Gid(),current_edge_.Type(),nullptr);
+      storage::HistoryEdge current_edge1=storage::HistoryEdge(current_edge_.Gid(),current_edge_.From().Gid(),current_edge_.To().Gid(),current_edge_.EdgeType(),nullptr);
       for(auto gid_delta_:gid_history_deltas_){
         current_edge1=context.db_accessor->CreateHistoryEdgeFromKV(current_edge1,gid_delta_);
-        storage::View view = storage::View::OLD;
-        auto expand_vertex_acc=context.db_accessor->FindVertex(direction==EdgeAtom::Direction::IN?current_edge1.From():current_edge1.To(), view);
-        if(expand_vertex_acc){
-          pull_nodes_current_history(context,*expand_vertex_acc, current_edge1.tt_ts, current_edge1.tt_te,TypedValue(current_edge1),history_add_,historyContext_);
-          if(!history_add_.empty())context.db_accessor->saveHistoryEdge(gid,historyContext_.c_ts,historyContext_.c_te,&current_edge1,current_edge1.tt_ts, current_edge1.tt_te);
-        }
+        pull_nodes_current_history(context,expand_vertex, current_edge1.tt_ts, current_edge1.tt_te,TypedValue(current_edge1),history_add_,historyContext_);
+        if(!history_add_.empty())context.db_accessor->saveHistoryEdge(gid,historyContext_.c_ts,historyContext_.c_te,&current_edge1,current_edge1.tt_ts, current_edge1.tt_te);
       }
     }
   }
