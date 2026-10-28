@@ -97,6 +97,10 @@ class EdgeAccessor final {
     return impl_.getDeltas();
   }
 
+  std::map<storage::PropertyId, storage::PropertyValue> getProperties() const {
+    return impl_.getProperties();
+  }
+
   bool operator==(const EdgeAccessor &e) const noexcept { return impl_ == e.impl_; }
 
   bool operator!=(const EdgeAccessor &e) const noexcept { return !(*this == e); }
@@ -336,6 +340,10 @@ class DbAccessor final {
   }
   storage::HistoryEdge CreateHistoryEdgeFromKV(storage::HistoryEdge edge_,nlohmann::json gid_delta_){
     return accessor_->CreateHistoryEdgeFromKV(edge_,gid_delta_);
+  }
+
+  storage::HistoryEdge CreateHistoryEdgeFromDelta(const storage::EdgeAccessor &another,std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> & may_props){
+    return accessor_->CreateHistoryEdgeFromDelta(another,may_props);
   }
 
   std::optional<VertexAccessor> FindDeleteVertex(storage::Gid gid, storage::View view){

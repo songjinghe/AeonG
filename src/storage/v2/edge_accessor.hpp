@@ -107,7 +107,14 @@ class EdgeAccessor final {
   uint64_t tt_te(){return (uint64_t)std::numeric_limits<int64_t>::max();}
   // wzy edit end
   Delta *getDeltas(){
+  if (!config_.properties_on_edges) return nullptr;
   return edge_.ptr->delta;
+  }
+  // Raw (unversioned) property map of the current edge version, used when
+  // reconstructing historical edge versions.
+  std::map<PropertyId, PropertyValue> getProperties() const {
+    if (!config_.properties_on_edges) return {};
+    return edge_.ptr->properties.Properties();
   }
   //hjm end
 

@@ -78,6 +78,7 @@
 namespace history_delta{
 extern bool TemporalCheck(uint64_t object_ts,uint64_t object_te,uint64_t c_ts,uint64_t c_te,std::string type);
 extern std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> >,bool> getDeadInfo2(query::VertexAccessor current_vertex_,uint64_t c_ts,uint64_t c_te,std::string types_);
+extern std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> >,bool> getDeadInfoEdge(query::EdgeAccessor current_edge,uint64_t c_ts,uint64_t c_te,std::string types_);
 extern  std::vector<std::string> splits(const std::string &str, const std::string &pattern);
 };
 
@@ -440,23 +441,24 @@ bool addHistoryVertex2(query::VertexAccessor &current_vertex_,history_delta::his
   auto obj_te=current_vertex_.tt_te();
   bool delete_flag=false;
 
+  //只有与当前边版本时间范围相交的节点版本才是合法的
   //加入历史节点的数据
   storage::HistoryVertex current_vertex1;
   bool history_flag=false;
-  auto [dead_deltas,need_deleted_flag]=history_delta::getDeadInfo2(current_vertex_,historyContext_.c_ts, historyContext_.c_te,historyContext_.types);
+  auto [dead_deltas,need_deleted_flag]=history_delta::getDeadInfo2(current_vertex_,historyContext2.c_ts, historyContext2.c_te,historyContext2.types);
   for (auto dead_delta:dead_deltas){
-    current_vertex1=context.db_accessor->CreateHistoryVertexFromDelta((current_vertex_).impl_,dead_delta,historyContext_);
+    current_vertex1=context.db_accessor->CreateHistoryVertexFromDelta((current_vertex_).impl_,dead_delta,historyContext2);
     history_flag=true;
     auto values=TypedValue(current_vertex1);
-    history_add_.emplace_back(current_edge,values); 
+    history_add_.emplace_back(current_edge,values);
   }
   //delete info
-  auto [gid_history_deltas_,flag]=context.db_accessor->GetHistoryDelta()->GetVertexInfo(current_vertex_.Gid(),historyContext_.c_ts,historyContext_.c_te,historyContext_.types);
+  auto [gid_history_deltas_,flag]=context.db_accessor->GetHistoryDelta()->GetVertexInfo(current_vertex_.Gid(),historyContext2.c_ts,historyContext2.c_te,historyContext2.types);
   for(auto gid_delta_:gid_history_deltas_){
     if(history_flag){
-      current_vertex1=context.db_accessor->CreateHistoryVertexFromKV(current_vertex1,gid_delta_,historyContext_);
+      current_vertex1=context.db_accessor->CreateHistoryVertexFromKV(current_vertex1,gid_delta_,historyContext2);
     }else {
-      current_vertex1=context.db_accessor->CreateHistoryVertexFromKV((current_vertex_).impl_,gid_delta_,historyContext_);
+      current_vertex1=context.db_accessor->CreateHistoryVertexFromKV((current_vertex_).impl_,gid_delta_,historyContext2);
     }
     history_flag=true;
     auto values=TypedValue(current_vertex1);
@@ -980,8 +982,8 @@ void pull_nodes_current_history(ExecutionContext &context,VertexAccessor current
     }
   }
   history_delta::historyContext historyContext2;
-  historyContext2.c_ts=fmax(obj_ts,historyContext_.c_ts);//ts
-  historyContext2.c_te=fmin(obj_te,historyContext_.c_te);//ts
+  historyContext2.c_ts=std::max(obj_ts,historyContext_.c_ts);//ts
+  historyContext2.c_te=std::min(obj_te,historyContext_.c_te);//ts
   historyContext2.types=historyContext_.types;
   addHistoryVertex2(current_vertex,historyContext_,historyContext2,current_edge,history_add_,context,true); //gmark
   return;
@@ -995,7 +997,6 @@ void addHistoryEdge(EdgeAccessor current_edge_,uint64_t current_v_ts,uint64_t cu
   //-----------------当前边---------------------
   if(obj_ts>=obj_te) delete_flag=true;
   auto expand_vertex = direction==EdgeAtom::Direction::IN?current_edge_.From():current_edge_.To();//需要expand的节点，判断历史数据
-  auto expand_vertex_gid= expand_vertex.Gid();
   //判断是否需要删除当前数据库的边 1、源节点和边的时间不相交
   if(!(current_v_ts<=obj_te&&obj_ts<=current_v_te)){
     delete_flag=true;
@@ -1005,44 +1006,50 @@ void addHistoryEdge(EdgeAccessor current_edge_,uint64_t current_v_ts,uint64_t cu
   if(!history_delta::TemporalCheck(obj_ts,obj_te,historyContext_.c_ts,historyContext_.c_te,historyContext_.types)){//删除当前数据库中的节点
     delete_flag=true;
   }
-  
-  auto edge_type_value=TypedValue(current_edge_);
-  if(!delete_flag){//不需要删除边，扩展历史节点，节点和边的时间需要相交
-    pull_nodes_current_history(context,expand_vertex, obj_ts, obj_te,edge_type_value,history_add_,historyContext_);
-  }
-  
+
   //如果不需要删除当前节点，并且类型是as of,则直接返回 不需要遍历历史数据
-  if(!delete_flag&historyContext_.types=="as of"){
+  if(!delete_flag&&historyContext_.types=="as of"){
+    pull_nodes_current_history(context,expand_vertex, obj_ts, obj_te,TypedValue(current_edge_),history_add_,historyContext_);
     context.db_accessor->saveHistoryEdgeFlag(gid,historyContext_.c_ts,historyContext_.c_te);
     return ;
   }
 
-  // 处理边的历史版本
-  auto before_flag=context.db_accessor->FindHistoryEdgeFlag(gid,historyContext_.c_ts,historyContext_.c_te);
-  auto edge_vector=context.db_accessor->FindHistoryEdge(gid,historyContext_.c_ts,historyContext_.c_te);
-  if(before_flag){
-    // 已经处理过,从缓存中获取
-    if(edge_vector){
-      for(auto[edge,ts,te]:*edge_vector){
-        auto edge1=*edge;
-        pull_nodes_current_history(context,expand_vertex, ts, te,TypedValue(edge1),history_add_,historyContext_);
-      }
-    }
-  }else{
-    // 从KV中获取历史边信息
-    auto [gid_history_deltas_,flag]=context.db_accessor->GetHistoryDelta()->GetEdgeInfo(historyContext_.c_ts,historyContext_.c_te,historyContext_.types,gid);
-    if(gid_history_deltas_.size()>0){
-      storage::HistoryEdge current_edge1=storage::HistoryEdge(current_edge_.Gid(),current_edge_.From().Gid(),current_edge_.To().Gid(),current_edge_.EdgeType(),nullptr);
-      for(auto gid_delta_:gid_history_deltas_){
-        current_edge1=context.db_accessor->CreateHistoryEdgeFromKV(current_edge1,gid_delta_);
-        pull_nodes_current_history(context,expand_vertex, current_edge1.tt_ts, current_edge1.tt_te,TypedValue(current_edge1),history_add_,historyContext_);
-        if(!history_add_.empty())context.db_accessor->saveHistoryEdge(gid,historyContext_.c_ts,historyContext_.c_te,&current_edge1,current_edge1.tt_ts, current_edge1.tt_te);
-      }
-    }
+  context.db_accessor->saveHistoryEdgeFlag(gid,historyContext_.c_ts,historyContext_.c_te);
+
+  //-----------------当前边---------------------
+  if(!delete_flag){//不需要删除边，扩展历史节点，节点和边的时间需要相交
+    pull_nodes_current_history(context,expand_vertex, obj_ts, obj_te,TypedValue(current_edge_),history_add_,historyContext_);
   }
 
-  context.db_accessor->saveHistoryEdgeFlag(gid,historyContext_.c_ts,historyContext_.c_te);
-  
+  //-----------------内存中的历史边版本---------------------
+  storage::HistoryEdge current_edge1;
+  bool history_flag=false;
+  auto [dead_deltas,need_deleted_flag]=history_delta::getDeadInfoEdge(current_edge_,historyContext_.c_ts,historyContext_.c_te,historyContext_.types);
+  for(auto &dead_delta:dead_deltas){
+    auto edge_ts=std::get<1>(dead_delta);
+    auto edge_te=std::get<2>(dead_delta);
+    //边版本必须与当前源节点版本的时间范围相交
+    if(!(current_v_ts<=edge_te&&edge_ts<=current_v_te)) continue;
+    current_edge1=context.db_accessor->CreateHistoryEdgeFromDelta(current_edge_.impl_,dead_delta);
+    history_flag=true;
+    pull_nodes_current_history(context,expand_vertex,edge_ts,edge_te,TypedValue(current_edge1),history_add_,historyContext_);
+  }
+
+  //-----------------历史存储中的历史边版本---------------------
+  auto [gid_history_deltas_,flag]=context.db_accessor->GetHistoryDelta()->GetEdgeInfo(historyContext_.c_ts,historyContext_.c_te,historyContext_.types,gid);
+  for(auto gid_delta_:gid_history_deltas_){
+    auto edge_ts=gid_delta_["TT_TS"].get<uint64_t>();
+    auto edge_te=gid_delta_["TT_TE"].get<uint64_t>();
+    if(!(current_v_ts<=edge_te&&edge_ts<=current_v_te)) continue;
+    if(history_flag){
+      current_edge1=context.db_accessor->CreateHistoryEdgeFromKV(current_edge1,gid_delta_);
+    }else{
+      current_edge1=context.db_accessor->CreateHistoryEdgeFromKV(current_edge_.impl_,gid_delta_);
+    }
+    history_flag=true;
+    pull_nodes_current_history(context,expand_vertex,edge_ts,edge_te,TypedValue(current_edge1),history_add_,historyContext_);
+  }
+
   return ;
 }
 

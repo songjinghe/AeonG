@@ -352,20 +352,41 @@ std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::Propert
     return std::make_pair(res,need_deleted_flag);
   }
   auto maybe_properties=current_vertex_.impl_.getProperties();
-  bool delta_is_edge=false;
-  uint64_t transaction_ts=0;
-  uint64_t transaction_te=0;
-  while (vertex_deltas != nullptr) {
-    delta_is_edge=false;
-    switch (vertex_deltas->action) {
+  auto delta_te=[](storage::Delta *delta) {
+    return delta->commit_timestamp!=0?delta->commit_timestamp:std::numeric_limits<uint64_t>::max();
+  };
+  // Changes of the adjacency list (VE part) are not part of the vertex property
+  // (VP) history. Deltas created together with the vertex (e.g. the CREATE
+  // statement sets its properties) have no predecessor version; their time
+  // window is invalid and they must not be reported as historical versions.
+  auto is_relevant=[&](storage::Delta *delta) {
+    switch (delta->action) {
       case storage::Delta::Action::ADD_OUT_EDGE:
-      case storage::Delta::Action::REMOVE_OUT_EDGE: 
+      case storage::Delta::Action::REMOVE_OUT_EDGE:
       case storage::Delta::Action::ADD_IN_EDGE:
-      case storage::Delta::Action::REMOVE_IN_EDGE:{
-        delta_is_edge=true;
+      case storage::Delta::Action::REMOVE_IN_EDGE:
+        return false;
+      default:
         break;
-      }
-      case storage::Delta::Action::SET_PROPERTY:{
+    }
+    return delta->transaction_st<=delta_te(delta);
+  };
+  auto next_relevant=[&](storage::Delta *delta) {
+    delta=delta->next.load(std::memory_order_acquire);
+    while (delta!=nullptr && !is_relevant(delta)) delta=delta->next.load(std::memory_order_acquire);
+    return delta;
+  };
+  while (vertex_deltas != nullptr) {
+    if (!is_relevant(vertex_deltas)) {
+      vertex_deltas=next_relevant(vertex_deltas);
+      continue;
+    }
+    auto transaction_ts=vertex_deltas->transaction_st;
+    auto transaction_te=delta_te(vertex_deltas);
+    // All deltas of one transaction describe the same version window, so they
+    // must be applied together before the version is reported.
+    do {
+      if(vertex_deltas->action==storage::Delta::Action::SET_PROPERTY){
         auto property_value=vertex_deltas->property.value;
         auto property_key=vertex_deltas->property.key;
         if(property_value.type()!=storage::PropertyValue::Type::Null) {
@@ -374,15 +395,9 @@ std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::Propert
           maybe_properties[property_key]=storage::PropertyValue("NULL");
         }
       }
-      default:break;
-    }
-    auto transaction_ts=vertex_deltas->transaction_st;
-    auto transaction_te=vertex_deltas->commit_timestamp!=0?vertex_deltas->commit_timestamp:std::numeric_limits<uint64_t>::max();
-    //跳过未提交的节点 一开始构建的节点
-    if(transaction_ts> transaction_te &&  delta_is_edge && transaction_te!=std::numeric_limits<uint64_t>::max()) {
-      vertex_deltas = vertex_deltas->next.load(std::memory_order_acquire);    
-      continue;
-    }//需要顶点的数据 delta是边
+      vertex_deltas=next_relevant(vertex_deltas);
+    } while (vertex_deltas!=nullptr && vertex_deltas->transaction_st==transaction_ts &&
+             delta_te(vertex_deltas)==transaction_te);
 
     if(history_delta::TemporalCheck(transaction_ts,transaction_te,c_ts,c_te,types_)){//&TemporalCheck(tmp_ts,tmp_te,c_ts,c_te,types)
       res.emplace_back(std::make_tuple(maybe_properties,transaction_ts,transaction_te));
@@ -391,10 +406,56 @@ std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::Propert
         break;
       }
     }
-    // Move to the next delta.
-    vertex_deltas = vertex_deltas->next.load(std::memory_order_acquire);    
   }
   return std::make_pair(res,need_deleted_flag);
+}
+
+std::pair<std::vector< std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> >,bool> getDeadInfoEdge(query::EdgeAccessor current_edge,uint64_t c_ts,uint64_t c_te,std::string types_){
+  std::vector<std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t>> res;
+  auto edge_deltas=current_edge.getDeltas();
+  if(edge_deltas==nullptr){
+    return std::make_pair(res,true);
+  }
+  auto maybe_properties=current_edge.getProperties();
+  auto delta_te=[](storage::Delta *delta) {
+    return delta->commit_timestamp!=0?delta->commit_timestamp:std::numeric_limits<uint64_t>::max();
+  };
+  // Only property deltas with a valid predecessor window create versions.
+  auto is_relevant=[&](storage::Delta *delta) {
+    return delta->action==storage::Delta::Action::SET_PROPERTY && delta->transaction_st<=delta_te(delta);
+  };
+  auto next_relevant=[&](storage::Delta *delta) {
+    delta=delta->next.load(std::memory_order_acquire);
+    while (delta!=nullptr && !is_relevant(delta)) delta=delta->next.load(std::memory_order_acquire);
+    return delta;
+  };
+  while (edge_deltas != nullptr) {
+    if (!is_relevant(edge_deltas)) {
+      edge_deltas=next_relevant(edge_deltas);
+      continue;
+    }
+    auto transaction_ts=edge_deltas->transaction_st;
+    auto transaction_te=delta_te(edge_deltas);
+    // All deltas of one transaction describe the same version window, so they
+    // must be applied together before the version is reported.
+    do {
+      auto property_value=edge_deltas->property.value;
+      auto property_key=edge_deltas->property.key;
+      if(property_value.type()!=storage::PropertyValue::Type::Null) {
+        maybe_properties[property_key]=property_value;
+      }else{
+        maybe_properties[property_key]=storage::PropertyValue("NULL");
+      }
+      edge_deltas=next_relevant(edge_deltas);
+    } while (edge_deltas!=nullptr && edge_deltas->transaction_st==transaction_ts &&
+             delta_te(edge_deltas)==transaction_te);
+
+    if(history_delta::TemporalCheck(transaction_ts,transaction_te,c_ts,c_te,types_)){
+      res.emplace_back(std::make_tuple(maybe_properties,transaction_ts,transaction_te));
+      if(types_=="as of") break;
+    }
+  }
+  return std::make_pair(res,true);
 }
 
 std::vector<nlohmann::json> History_delta::GetDeleteEdgeInfo(uint64_t c_ts,uint64_t c_te,std::string type,uint64_t vertex_gid){

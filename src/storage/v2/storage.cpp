@@ -119,6 +119,25 @@ std::map<std::string, storage::PropertyValue> DeserializePropertyValueMap(const 
   return property_values;
 }
 
+// Applies the property deltas stored in a historical-storage record ("SP")
+// to the given property map. The stored values are the values that the
+// properties had in the historical version, so they are written on top of the
+// current (or previously reconstructed) version.
+void ApplyStoredPropertyDeltas(const nlohmann::json &gid_delta,
+                               std::map<PropertyId, PropertyValue> &properties, NameIdMapper &name_id_mapper) {
+  const auto it = gid_delta.find("SP");
+  if (it == gid_delta.end() || !it->is_object()) return;
+  for (auto prop = it->begin(); prop != it->end(); ++prop) {
+    auto property_id = PropertyId::FromUint(name_id_mapper.NameToId(prop.key()));
+    auto value = DeserializePropertyValue(prop.value());
+    if (value.IsNull()) {
+      properties[property_id] = PropertyValue("NULL");
+    } else {
+      properties[property_id] = std::move(value);
+    }
+  }
+}
+
 nlohmann::json SerializePropertyValueVector(const std::vector<storage::PropertyValue> &values);
 
 nlohmann::json SerializePropertyValueMap(const std::map<std::string, storage::PropertyValue> &parameters);
@@ -595,16 +614,14 @@ storage::HistoryVertex Storage::Accessor::CreateHistoryVertexFromKV(const storag
   //properties
   auto maybe_labels= vertex_.labels;
   auto maybe_properties=vertex_.properties;
-
-  //deleted info
-  auto property_ids = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("delete_info"));
-  auto property_values = storage::PropertyValue(gid_delta_.dump());
-  maybe_properties[property_ids]=property_values;
-
+  ApplyStoredPropertyDeltas(gid_delta_, maybe_properties, storage_->name_id_mapper_);
 
   auto tt_ts=gid_delta_["TT_TS"].get<uint64_t>();
   auto tt_te=gid_delta_["TT_TE"].get<uint64_t>();
-  //TODO edges
+  auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_ts"));
+  auto property_id2 = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_te"));
+  maybe_properties[property_id]=storage::PropertyValue((int64_t)tt_ts);
+  maybe_properties[property_id2]=storage::PropertyValue((int64_t)tt_te);
 
   auto new_vertex=HistoryVertex(vertex_.gid,tt_ts,tt_te);
   new_vertex.labels=maybe_labels;
@@ -622,15 +639,15 @@ storage::HistoryVertex Storage::Accessor::CreateHistoryVertexFromKV(const Vertex
   auto deltas=another.vertex_->delta;
   auto maybe_properties=another.vertex_->properties.Properties();
   auto maybe_labels=another.vertex_->labels;
-  //deleted info
-  auto property_ids = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("delete_info"));
-  auto property_values = storage::PropertyValue(gid_delta_.dump());
-  maybe_properties[property_ids]=property_values;
-
+  ApplyStoredPropertyDeltas(gid_delta_, maybe_properties, storage_->name_id_mapper_);
 
   auto tt_ts=gid_delta_["TT_TS"].get<uint64_t>();
   auto tt_te=gid_delta_["TT_TE"].get<uint64_t>();
-  //TODO edges
+  auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_ts"));
+  auto property_id2 = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_te"));
+  maybe_properties[property_id]=storage::PropertyValue((int64_t)tt_ts);
+  maybe_properties[property_id2]=storage::PropertyValue((int64_t)tt_te);
+
   auto new_vertex=HistoryVertex(another.vertex_->gid,tt_ts,tt_te);
   new_vertex.labels=maybe_labels;
   new_vertex.properties=maybe_properties;
@@ -669,27 +686,10 @@ storage::HistoryVertex Storage::Accessor::CreateHistoryVertexFromDelta(const Ver
 
 
 storage::HistoryEdge Storage::Accessor::CreateHistoryEdgeFromKV(const EdgeAccessor &another,nlohmann::json gid_delta_){
-  auto maybe_properties=another.edge_.ptr->properties.Properties();
-  auto from_gid=another.FromVertex().Gid();
-  auto to_gid=another.ToVertex().Gid();
-  //还原到最近的dead info
-  auto deltas=another.edge_.ptr->delta;
-  while (deltas != nullptr) {
-    switch (deltas->action) {
-      case storage::Delta::Action::SET_PROPERTY: {
-        auto property_value =deltas->property.value;
-        if(property_value.type()!=storage::PropertyValue::Type::Null) maybe_properties[deltas->property.key]=property_value;
-        else{
-          maybe_properties[deltas->property.key]=storage::PropertyValue("NULL");;
-        }
-        break;
-      }
-      default:break;
-    }
-    // Move to the next delta.
-    deltas = deltas->next.load(std::memory_order_acquire);    
-  }
-
+  auto maybe_properties=another.getProperties();
+  auto from_gid=another.fromGid();
+  auto to_gid=another.toGid();
+  ApplyStoredPropertyDeltas(gid_delta_, maybe_properties, storage_->name_id_mapper_);
 
   //TT_TS TT_TE
   auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_ts"));
@@ -701,31 +701,14 @@ storage::HistoryEdge Storage::Accessor::CreateHistoryEdgeFromKV(const EdgeAccess
   maybe_properties[property_id2]=property_value2;
   auto tt_ts=gid_delta_["TT_TS"].get<uint64_t>();
   auto tt_te=gid_delta_["TT_TE"].get<uint64_t>();
-  // std::cout<<"CreateHistoryEdgeFromKV1:"<<tt_ts<<" "<<tt_te<<" "<<from_gid.AsUint()<<" "<<to_gid.AsUint()<<" ""\n";
-  //TODO edges
-  auto history_edge=HistoryEdge(another.edge_.ptr->gid,tt_ts,tt_te,from_gid,to_gid,another.EdgeType(),nullptr); 
+  auto history_edge=HistoryEdge(another.Gid(),tt_ts,tt_te,from_gid,to_gid,another.EdgeType(),nullptr);
   history_edge.properties=maybe_properties;
   return history_edge;
 }
 
 storage::HistoryEdge Storage::Accessor::CreateHistoryEdgeFromKV(storage::HistoryEdge edge_,nlohmann::json gid_delta_){
   auto maybe_properties=edge_.properties;
-  //properties 
-  // wzy begin no-edge-version
-  // if(gid_delta_.find("SP")!=gid_delta_.end()){
-  //   auto history_props_=gid_delta_["SP"];
-  //   for(auto it_iter= history_props_.begin(); it_iter != history_props_.end(); ++it_iter){
-  //     auto key = it_iter.key();
-  //     auto value=it_iter.value();
-  //     auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId(key));
-  //     auto property_value = DeserializePropertyValue(value);//query::serialization::
-  //     if(property_value.type()!=storage::PropertyValue::Type::Null) maybe_properties[property_id]=property_value;
-  //     else{
-  //       maybe_properties[property_id]=storage::PropertyValue("NULL");;
-  //     }
-  //   }
-  // }
-  // wzy end
+  ApplyStoredPropertyDeltas(gid_delta_, maybe_properties, storage_->name_id_mapper_);
 
   //TT_TS TT_TE
   auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_ts"));
@@ -740,6 +723,24 @@ storage::HistoryEdge Storage::Accessor::CreateHistoryEdgeFromKV(storage::History
   // std::cout<<"CreateHistoryEdgeFromKV2:"<<tt_ts<<" "<<tt_te<<" "<<edge_.from_gid.AsUint()<<" "<<edge_.to_gid.AsUint()<<"\n";
   //TODO edges
   auto history_edge=HistoryEdge(edge_.gid,tt_ts,tt_te,edge_.from_gid,edge_.to_gid,edge_.type,nullptr);
+  history_edge.properties=maybe_properties;
+  return history_edge;
+}
+
+storage::HistoryEdge Storage::Accessor::CreateHistoryEdgeFromDelta(const EdgeAccessor &another,std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> & maybe_props){
+  auto tt_ts=std::get<1>(maybe_props);
+  auto tt_te=std::get<2>(maybe_props);
+  auto maybe_properties=std::get<0>(maybe_props);
+
+  auto property_id = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_ts"));
+  auto property_value = storage::PropertyValue((int64_t)tt_ts);
+  maybe_properties[property_id]=property_value;
+
+  auto property_id2 = PropertyId::FromUint(storage_->name_id_mapper_.NameToId("transaction_te"));
+  auto property_value2 = storage::PropertyValue((int64_t)tt_te);
+  maybe_properties[property_id2]=property_value2;
+
+  auto history_edge=HistoryEdge(another.Gid(),tt_ts,tt_te,another.fromGid(),another.toGid(),another.EdgeType(),nullptr);
   history_edge.properties=maybe_properties;
   return history_edge;
 }

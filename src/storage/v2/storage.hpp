@@ -228,6 +228,7 @@ class Storage final {
     storage::HistoryVertex CreateHistoryVertexFromKV(const VertexAccessor &another,nlohmann::json gid_delta_,history_delta::historyContext &historyContext_);
     storage::HistoryEdge CreateHistoryEdgeFromKV(const EdgeAccessor &another,nlohmann::json gid_delta_);
     storage::HistoryEdge CreateHistoryEdgeFromKV(storage::HistoryEdge edge_,nlohmann::json gid_delta_);
+    storage::HistoryEdge CreateHistoryEdgeFromDelta(const EdgeAccessor &another,std::tuple< std::map<storage::PropertyId,storage::PropertyValue>,uint64_t,uint64_t> & may_props);
     Result<std::vector<EdgeAccessor>> Edges(std::vector<std::tuple<EdgeTypeId, Vertex *, EdgeRef>> &edges_,const std::vector<EdgeTypeId> &edge_types,storage::Gid gid,bool from,std::optional<storage::Gid> existing_gid);
     Gid IdToGid(const uint64_t key);
     std::optional<VertexAccessor> FindDeleteVertex(Gid gid, View view);
